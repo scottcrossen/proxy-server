@@ -6,17 +6,17 @@
 #define __MAC_OS_X
 #include "csapp.h"
 
-void		doit      (int fd);
+void		*doit      (void *vargp);
 void		read_requesthdrs(rio_t * rp);
 int		parse_uri  (char *uri, char *filename, char *cgiargs);
 void		serve_static(int fd, char *filename, int filesize);
 void		get_filetype(char *filename, char *filetype);
 void		serve_dynamic(int fd, char *filename, char *cgiargs);
-void 
+void
 clienterror(int fd, char *cause, char *errnum,
 	    char *shortmsg, char *longmsg);
 
-int 
+int
 main(int argc, char **argv)
 {
 	int		listenfd  , connfd;
@@ -34,15 +34,15 @@ main(int argc, char **argv)
 	while (1)
 	{
 		clientlen = sizeof(clientaddr);
-		connfd = Accept(listenfd, (SA *) & clientaddr, &clientlen);
-//line: netp: tiny:accept
-			Getnameinfo((SA *) & clientaddr, clientlen, hostname, MAXLINE,
-				    port, MAXLINE, 0);
+    int* connfd = Malloc(sizeof(int));
+		*connfd = Accept(listenfd, (SA *) & clientaddr, &clientlen);
+    //line: netp: tiny:accept
+		Getnameinfo((SA *) & clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
 		printf("Accepted connection from (%s, %s)\n", hostname, port);
-		doit(connfd);
-//line: netp: tiny:doit
-			Close(connfd);
-//line: netp: tiny:close
+    pthread_t tid;
+    Pthread_create(&tid, NULL, doit, connfd);
+    //line: netp: tiny:doit
+    //line: netp: tiny:close
 	}
 }
 /* $end tinymain */
@@ -51,67 +51,58 @@ main(int argc, char **argv)
  * doit - handle one HTTP request/response transaction
  */
 /* $begin doit */
-void 
-doit(int fd)
+void *doit(void *vargp)
 {
-	int		is_static;
-	struct stat	sbuf;
-	char		buf       [MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-	char		filename  [MAXLINE], cgiargs[MAXLINE];
-	rio_t		rio;
+  int fd = *((int *)vargp);
+  Pthread_detach(pthread_self());
+  Free(vargp);
+  int		is_static;
+  struct stat	sbuf;
+  char		buf       [MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+  char		filename  [MAXLINE], cgiargs[MAXLINE];
+  rio_t		rio;
 
-	/* Read request line and headers */
-	Rio_readinitb(&rio, fd);
-	if (!Rio_readlineb(&rio, buf, MAXLINE))
-//line: netp: doit:readrequest
-			return;
-	printf("%s", buf);
-	sscanf(buf, "%s %s %s", method, uri, version);
-//line: netp: doit:parserequest
-		if (strcasecmp(method, "GET"))
-	{
-//line: netp: doit:beginrequesterr
-			clienterror(fd, method, "501", "Not Implemented",
-				    "Tiny does not implement this method");
-		return;
-} //line: netp: doit:endrequesterr
-		read_requesthdrs(&rio);
-//line: netp: doit:readrequesthdrs
-
-	/* Parse URI from GET request */
-		is_static = parse_uri(uri, filename, cgiargs);
-//line: netp: doit:staticcheck
-		if (stat(filename, &sbuf) < 0)
-	{
-//line: netp: doit:beginnotfound
-			clienterror(fd, filename, "404", "Not found",
-				    "Tiny couldn't find this file");
-		return;
-} //line: netp: doit:endnotfound
-
-		if (is_static)
-	{			/* Serve static content */
-		if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode))
-		{
-	//line: netp: doit:readable
-				clienterror(fd, filename, "403", "Forbidden",
-					    "Tiny couldn't read the file");
-			return;
-		}
-		serve_static(fd, filename, sbuf.st_size);
-//line: netp: doit:servestatic
-	} else
-	{			/* Serve dynamic content */
-		if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode))
-		{
-	//line: netp: doit:executable
-				clienterror(fd, filename, "403", "Forbidden",
-				       "Tiny couldn't run the CGI program");
-			return;
-		}
-		serve_dynamic(fd, filename, cgiargs);
-//line: netp: doit:servedynamic
-	}
+  /* Read request line and headers */
+  Rio_readinitb(&rio, fd);
+  if (Rio_readlineb(&rio, buf, MAXLINE)) {
+    printf("%s", buf);
+    sscanf(buf, "%s %s %s", method, uri, version);
+    //line: netp: doit:parserequest
+    if (strcasecmp(method, "GET")) {
+      //line: netp: doit:beginrequesterr
+      clienterror(fd, method, "501", "Not Implemented", "Tiny does not implement this method");
+    } else { //line: netp: doit:endrequesterr
+      read_requesthdrs(&rio);
+      //line: netp: doit:readrequesthdrs
+      /* Parse URI from GET request */
+      is_static = parse_uri(uri, filename, cgiargs);
+      //line: netp: doit:staticcheck
+      if (stat(filename, &sbuf) < 0) {
+        //line: netp: doit:beginnotfound
+        clienterror(fd, filename, "404", "Not found", "Tiny couldn't find this file");
+         //line: netp: doit:endnotfound
+      } else if (is_static) { /* Serve static content */
+        if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
+          //line: netp: doit:readable
+          clienterror(fd, filename, "403", "Forbidden",
+          "Tiny couldn't read the file");
+        } else {
+          serve_static(fd, filename, sbuf.st_size);
+        }
+        //line: netp: doit:servestatic
+      } else {/* Serve dynamic content */
+        if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
+          //line: netp: doit:executable
+          clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't run the CGI program");
+        } else {
+          serve_dynamic(fd, filename, cgiargs);
+        }
+        //line: netp: doit:servedynamic
+      }
+    }
+  }
+  Close(fd);
+  return NULL;
 }
 /* $end doit */
 
@@ -119,7 +110,7 @@ doit(int fd)
  * read_requesthdrs - read HTTP request headers
  */
 /* $begin read_requesthdrs */
-void 
+void
 read_requesthdrs(rio_t * rp)
 {
 	char		buf       [MAXLINE];
@@ -141,7 +132,7 @@ read_requesthdrs(rio_t * rp)
  * content, 1 if static
  */
 /* $begin parse_uri */
-int 
+int
 parse_uri(char *uri, char *filename, char *cgiargs)
 {
 	char           *ptr;
@@ -185,7 +176,7 @@ parse_uri(char *uri, char *filename, char *cgiargs)
  * serve_static - copy a file back to the client
  */
 /* $begin serve_static */
-void 
+void
 serve_static(int fd, char *filename, int filesize)
 {
 	int		srcfd;
@@ -221,7 +212,7 @@ serve_static(int fd, char *filename, int filesize)
 /*
  * get_filetype - derive file type from file name
  */
-void 
+void
 get_filetype(char *filename, char *filetype)
 {
 	if (strstr(filename, ".html"))
@@ -241,7 +232,7 @@ get_filetype(char *filename, char *filetype)
  * serve_dynamic - run a CGI program on behalf of the client
  */
 /* $begin serve_dynamic */
-void 
+void
 serve_dynamic(int fd, char *filename, char *cgiargs)
 {
 	char		buf       [MAXLINE], *emptylist[] = {NULL};
@@ -273,7 +264,7 @@ serve_dynamic(int fd, char *filename, char *cgiargs)
  * clienterror - returns an error message to the client
  */
 /* $begin clienterror */
-void 
+void
 clienterror(int fd, char *cause, char *errnum,
 	    char *shortmsg, char *longmsg)
 {
