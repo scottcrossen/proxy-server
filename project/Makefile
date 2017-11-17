@@ -10,8 +10,8 @@ SOURCEDIR = source
 RELDIR = rel
 TESTDIR = test
 COMP = gcc
-BINOBJS = ${BINDIR}/proxy.o ${BINDIR}/csapp.o
-MAIN = ${RELDIR}/proxy
+BINOBJS = ${BINDIR}/proxy.o ${BINDIR}/csapp.o ${BINDIR}/cache.o
+MAIN = ./proxy
 COMPFLAGS = -g -Wall
 LINKFLAGS = -lrt -lpthread
 HANDINDIR = /users/faculty/snell/CS324/handin/Fall2017/ProxyLab1
@@ -27,7 +27,7 @@ all: $(MAIN)
 
 .PHONY: clean
 clean:
-	rm -rf $(BINDIR) $(RELDIR)
+	rm -rf $(BINDIR) $(RELDIR) $(MAIN)
 
 .PHONY: handin
 handin:
@@ -48,4 +48,8 @@ ${BINDIR}/%.o: ${SOURCEDIR}/%.c ${SOURCEDIR}/%.h
 .PRECIOUS: ${RELDIR}/%
 ${RELDIR}/%: $(BINOBJS)
 	mkdir -p $(@D)
+	$(COMP) $^ -o $@ $(COMPFLAGS) $(LINKFLAGS)
+
+.PRECIOUS: proxy
+proxy: $(BINOBJS)
 	$(COMP) $^ -o $@ $(COMPFLAGS) $(LINKFLAGS)
