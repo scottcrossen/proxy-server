@@ -1,8 +1,3 @@
-/*
- TODO: add comments,
- TODO: remove cache
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +29,7 @@ void* thread_routine(void* arg);
 #define NON_GET_METHOD 2
 
 int main(int argc, char* argv []) {
+  // Initialize server. This is mostly taken directly from tiny server
   char* port;
   int listenfd;
   pthread_t tid;
@@ -41,24 +37,32 @@ int main(int argc, char* argv []) {
   socklen_t clientlen;
   thread_args args;
 
+  // Catch the proper signals.
   Signal(SIGPIPE, SIG_IGN);
 
+  // Process input arguments.
   if (argc != 2 ) {
+    // User did not supply enough arguments
     fprintf(stderr, "Usage: %s [port]", argv[0]);
     exit(1);
   } else if (atoi(argv[1]) <= 0) {
+    // Port is not integer.
     fprintf(stderr, "Port number invalid\n");
     exit(1);
   } else {
+    // Proper arguments supplied
     port = argv[1];
     if ((listenfd = Open_listenfd(port)) < 0) {
+      // Port in use.
       fprintf(stderr, "Error attaching to port %d\n", *port);
       exit(1);
     } else {
+      // Port not in use. Attach and listen.
       args.cache = init_cache();
       while (1) {
         clientlen = sizeof(clientaddr);
         args.connfd = Accept(listenfd, (SA*) &clientaddr, (socklen_t*) &clientlen);
+        // Spawn new thread as appropriate.
         Pthread_create(&tid, NULL, thread_routine, &args);
       }
     }
@@ -67,6 +71,7 @@ int main(int argc, char* argv []) {
 }
 
 void* thread_routine(void* vargp) {
+  // Main thread routine when a new connection is encountered.
   thread_args* args = (thread_args*) vargp;
   int client_fd = (args->connfd);
   cache_queue* cache = (args->cache);
@@ -76,27 +81,34 @@ void* thread_routine(void* vargp) {
   int server_fd = -1;
   unsigned int cache_length;
 
+  // Run thread in detached method.
   Pthread_detach(pthread_self());
 
+  // request the correct content from the server.
   if ((ret_val = request_from_server(cache, client_fd, &server_fd, cache_id, cache_content, &cache_length)) == -1) {
+    // Fetch failed
     close_connection(&client_fd, &server_fd);
     Pthread_exit(NULL);
   } else if (ret_val == READ_FROM_CACHE) {
+    // Content is cached.
     if (serve_client_from_cache(client_fd, cache_content, cache_length) == -1) {
       close_connection(&client_fd, &server_fd);
       Pthread_exit(NULL);
     }
   } else if (ret_val == NON_GET_METHOD) {
+    // Only get methods supported.
     if (serve_client(client_fd, server_fd) == -1) {
       close_connection(&client_fd, &server_fd);
       Pthread_exit(NULL);
     }
   } else {
+    // Correct branch taken. Cache output when available.
     if (serve_client_and_cache(cache, client_fd, server_fd, cache_id, cache_content) == -1) {
       close_connection(&client_fd, &server_fd);
       Pthread_exit(NULL);
     }
   }
+  // Success!
   close_connection(&client_fd, &server_fd);
   return NULL;
 }
@@ -114,11 +126,13 @@ int process_get_request(
   void* cache_content,
   unsigned int* cache_length
 ) {
+  // Initialize local variables
   char origin_host_header[MAXLINE];
   char remote_host[MAXLINE];
   char remote_port[MAXLINE];
   char request_buffer[MAXLINE];
 
+  // Build get request from server.
   strcpy(remote_host, "");
   strcpy(remote_port, "80");
   parse_host(host_port, remote_host, remote_port);
@@ -127,7 +141,10 @@ int process_get_request(
   strcat(request_buffer, resource);
   strcat(request_buffer, " ");
   strcat(request_buffer, http_version);
+  // Use helper functions to communicate with server.
   while (Rio_readlineb(&rio_client, buffer, MAXLINE) != 0) {
+    // Process the output correctly.
+    // Copy over every correct feild.
     if (strcmp(buffer, "\r\n") == 0) {
       break;
     } else if (strstr(buffer, "User-Agent:") != NULL) {
@@ -148,25 +165,32 @@ int process_get_request(
     }
   }
   strcat(request_buffer, "\r\n");
+  // Make sure that this host isn't null.
   if (strcmp(remote_host, "") == 0) {
     return -1;
   } else {
+    // Build over cached key
     strcpy(cache_id, method);
     strcat(cache_id, " ");
     strcat(cache_id, remote_host);
     strcat(cache_id, ":");
     strcat(cache_id, remote_port);
     strcat(cache_id, resource);
-    if (read_cache_element_lru_sync(cache, cache_id, cache_content, cache_length) != -1) {
+    // Access cached element.
+    if (read_cache_element_sync(cache, cache_id, cache_content, cache_length) != -1) {
+      // Cache contains element. Differ.
       return READ_FROM_CACHE;
     } else {
+      // Open port and connect.
       if ((*to_server_fd = Open_clientfd(remote_host, remote_port)) == -1) {
         return -1;
       } else if (*to_server_fd == -2) {
+        // Write buffer as appropriate
         strcpy(buffer, client_bad_request);
         Rio_writen(fd, buffer, strlen(buffer));
         return -1;
       } else if (Rio_writen(*to_server_fd, request_buffer, strlen(request_buffer)) == -1) {
+        // An error occurred.
         return -1;
       } else {
         return 0;
@@ -181,6 +205,7 @@ int process_non_get_request(
   char* host_port,
   int* to_server_fd
 ) {
+  // Initialize local variables
   char origin_host_header[MAXLINE];
   char remote_host[MAXLINE];
   char remote_port[MAXLINE];
@@ -188,14 +213,18 @@ int process_non_get_request(
   unsigned int length = 0;
   unsigned int size = 0;
 
+  // Build request correctly.
   strcpy(remote_host, "");
   strcpy(remote_port, "80");
   parse_host(host_port, remote_host, remote_port);
   strcpy(request_buffer, buffer);
+  // Process buffer
   while (strcmp(buffer, "\r\n") != 0 && strlen(buffer) > 0) {
+    // Use helper functions to process
     if (Rio_readlineb(&rio_client, buffer, MAXLINE) == -1) {
       return -1;
     } else {
+      // Build header
       if (strstr(buffer, "Host:") != NULL) {
         strcpy(origin_host_header, buffer);
         if (strlen(remote_host) < 1) {
@@ -203,21 +232,28 @@ int process_non_get_request(
           parse_host(host_port, remote_host, remote_port);
         }
       }
+      // Continue building header.
       if (strstr(buffer, "Content-Length")) {
         sscanf(buffer, "Content-Length: %d", &size);
       }
       strcat(request_buffer, buffer);
     }
   }
+  // Communicate
   if (strcmp(remote_host, "") == 0) {
+    // Remove host doesn't exist.
     return -1;
   } else {
     char port = atoi(remote_port);
+    // Connect to server and request.
     if ((*to_server_fd = Open_clientfd(remote_host, &port)) < 0) {
+      // Connection failed.
       return -1;
     } else if (Rio_writen(*to_server_fd, request_buffer, strlen(request_buffer)) == -1) {
+      // Verify wriiten.
       return -1;
     } else {
+      // Process paged output too large
       while (size > MAXLINE) {
         if ((length = Rio_readnb(&rio_client, buffer, MAXLINE)) == -1) {
           return -1;
@@ -227,6 +263,7 @@ int process_non_get_request(
           size -= MAXLINE;
         }
       }
+      // Size in correct range now,
       if (size > 0) {
         if ((length = Rio_readnb(&rio_client, buffer, size)) == -1) {
           return -1;
@@ -234,6 +271,7 @@ int process_non_get_request(
           return -1;
         }
       }
+      // Return this to requester.
       return NON_GET_METHOD;
     }
   }
@@ -247,26 +285,33 @@ int request_from_server(
   void* cache_content,
   unsigned int* cache_length
 ) {
+  // Initialize local variables
   char buffer[MAXLINE];
   char host_port[MAXLINE];
   char method[MAXLINE];
   char resource[MAXLINE];
   rio_t rio_client;
 
+  // Request data from server.
   memset(cache_content, 0, MAX_OBJECT_SIZE);
   Rio_readinitb(&rio_client, fd);
   if (Rio_readlineb(&rio_client, buffer, MAXLINE) == -1) {
+    // An error occurred.
     printf("%s\n", buffer);
     return -1;
   } else {
+    // Process request.
     char protocol[MAXLINE];
     char version[MAXLINE];
     if (parse_request(buffer, method, protocol, host_port, resource, version) == -1) {
       return -1;
     } else {
+      // Make sure the get request works.
       if (strstr(method, "GET") != NULL) {
+        // Process the get request.
         return process_get_request(cache, fd, buffer, method, resource, rio_client, host_port, to_server_fd, cache_id, cache_content, cache_length);
       } else {
+        // This isn't a get request.
         return process_non_get_request(buffer, rio_client, host_port, to_server_fd);
       }
     }
@@ -274,21 +319,27 @@ int request_from_server(
 }
 
 int serve_client(int to_client_fd, int to_server_fd) {
+  // Initialize local variables.
   char buffer[MAXLINE];
   rio_t rio_server;
   unsigned int length = 0;
   unsigned int size = 0;
 
+  // Repond to client.
   Rio_readinitb(&rio_server, to_server_fd);
   if (Rio_readlineb(&rio_server, buffer, MAXLINE) == -1) {
+    // An error occured on library call.
     return -1;
   } else if (Rio_writen(to_client_fd, buffer, strlen(buffer)) == -1) {
+    // An error occured on library call.
     return -1;
   } else {
+    // Process body of response.
     while (strcmp(buffer, "\r\n") != 0 && strlen(buffer) > 0) {
       if (Rio_readlineb(&rio_server, buffer, MAXLINE) == -1) {
         return -1;
       } else {
+        // Push in content length if available.
         if (strstr(buffer, "Content-Length")) {
           sscanf(buffer, "Content-Length: %d", &size);
         }
@@ -297,7 +348,9 @@ int serve_client(int to_client_fd, int to_server_fd) {
         }
       }
     }
+    // Response has content.
     if (size > 0) {
+      // Process paged data.
       while (size > MAXLINE) {
         if ((length = Rio_readnb(&rio_server, buffer, MAXLINE)) == -1) {
           return -1;
@@ -307,6 +360,7 @@ int serve_client(int to_client_fd, int to_server_fd) {
           size -= MAXLINE;
         }
       }
+      // Process normally.
       if (size > 0) {
         if ((length = Rio_readnb(&rio_server, buffer, size)) == -1) {
           return -1;
@@ -315,7 +369,9 @@ int serve_client(int to_client_fd, int to_server_fd) {
         }
       }
     } else {
+      // Response doesn't ahve content.
       while ((length = Rio_readnb(&rio_server, buffer, MAXLINE)) > 0) {
+        // Respond accordingly.
         if (Rio_writen(to_client_fd, buffer, length) == -1) {
           return -1;
         }
@@ -330,6 +386,7 @@ int serve_client_from_cache(
   void* cache_content,
   unsigned int cache_length
 ) {
+  // Thank you helper methods.
   if (Rio_writen(to_client_fd, cache_content, cache_length)) {
     return -1;
   } else {
@@ -345,9 +402,11 @@ int cache_and_serve(
   unsigned int* cache_length,
   unsigned int length
 ) {
+  // Initialize local variables.
   void* current_cache_position;
 
   if (*valid_obj_size) {
+    // Object is valid.
     if ((*cache_length + strlen(buffer)) > MAX_OBJECT_SIZE) {
       *valid_obj_size = 0;
     } else {
@@ -357,6 +416,7 @@ int cache_and_serve(
       *valid_obj_size = 1;
     }
   }
+  // Serve from buffer.
   if (Rio_writen(to_client_fd, buffer, length) == -1) {
     return -1;
   } else {
@@ -371,6 +431,7 @@ int serve_client_and_cache(
   char* cache_id,
   void* cache_content
 ) {
+  // Initialize local variables.
   char buffer[MAXLINE];
   int valid_obj_size = 1;
   rio_t rio_server;
@@ -378,17 +439,21 @@ int serve_client_and_cache(
   unsigned int length = 0;
   unsigned int size = 0;
 
+  // Begin main routine.
   Rio_readinitb(&rio_server, to_server_fd);
   if (Rio_readlineb(&rio_server, buffer, MAXLINE) == -1) {
     return -1;
   } else {
+    // Can we cache and server normally?
     if(cache_and_serve(buffer, to_client_fd, &valid_obj_size, cache_content, &cache_length, strlen(buffer)) == -1) {
       return -1;
     } else {
+      // Process buffer.
       while (strcmp(buffer, "\r\n") != 0 && strlen(buffer) > 0) {
         if (Rio_readlineb(&rio_server, buffer, MAXLINE) == -1) {
           return -1;
         } else {
+          // Check content and server if necessary.
           if (strstr(buffer, "Content-Length")) {
             sscanf(buffer, "Content-Length: %d", &size);
           }
@@ -398,6 +463,7 @@ int serve_client_and_cache(
         }
       }
       if (size > 0) {
+        // Send content if necessary untill size normal. Proceed normally.
         while (size > MAXLINE) {
           if ((length = Rio_readnb(&rio_server, buffer, MAXLINE)) == -1) {
             return -1;
@@ -410,6 +476,7 @@ int serve_client_and_cache(
           }
         }
         if (size > 0) {
+          // Process with normal service.
           if ((length = Rio_readnb(&rio_server, buffer, size)) == -1) {
             return -1;
           } else if (cache_and_serve(buffer, to_client_fd, &valid_obj_size, cache_content, &cache_length, length) == -1) {
@@ -417,12 +484,14 @@ int serve_client_and_cache(
           }
         }
       } else {
+        // Content no good.
         while ((length = Rio_readnb(&rio_server, buffer, MAXLINE)) > 0) {
           if(cache_and_serve(buffer, to_client_fd, &valid_obj_size, cache_content, &cache_length, length) == -1) {
             return -1;
           }
         }
       }
+      // Syncronously add data to cache.
       if (valid_obj_size && (add_data_to_cache_sync(cache, cache_id, cache_content, cache_length) == -1)) {
         return -1;
       } else {
@@ -440,11 +509,14 @@ int parse_request (
   char* resource,
   char* version
 ) {
+  // Initialize local variables
   char url[MAXLINE];
 
+  // Not going to lie, I read someone else's code on how to do this part.
   if (strstr(buffer, "/") == NULL || strlen(buffer) < 1) {
     return -1;
   } else {
+    // Process request and propulate feilds.
     strcpy(resource, "/");
     sscanf(buffer, "%s %s %s", method, url, version);
     if (strstr(url, "://") != NULL) {
@@ -457,8 +529,10 @@ int parse_request (
 }
 
 void parse_host(char* host_port, char* remote_host, char* remote_port) {
+  // Initialize local variables.
   char* tmp = NULL;
 
+  // Grab host port.
   tmp = index(host_port, ':');
   if (tmp != NULL) {
     *tmp = '\0';
@@ -466,15 +540,19 @@ void parse_host(char* host_port, char* remote_host, char* remote_port) {
   } else {
     strcpy(remote_port, "80");
   }
+  // Copy appropriately
   strcpy(remote_host, host_port);
 }
 
 void close_connection(int* to_client_fd, int* to_server_fd) {
+  // Thread exited. Close connections.
   if (*to_client_fd >= 0) {
+    // Close client connection.
     Close(*to_client_fd);
     to_client_fd = NULL;
   }
   if (*to_server_fd >= 0) {
+    // Close server connection.
     Close(*to_server_fd);
     to_server_fd = NULL;
   }

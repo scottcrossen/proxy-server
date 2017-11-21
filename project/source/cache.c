@@ -180,7 +180,7 @@ cache_element *delete_cache_element(cache_queue *queue, char *id) {
  * Write the data of the cache node
  * to the buf and the apply a LRU policy
  */
-int read_cache_element_lru_sync(cache_queue *queue, char *id, void *data,
+int read_cache_element_sync(cache_queue *queue, char *id, void *data,
                              unsigned int *length) {
     if (queue == NULL) {
         return -1;

@@ -39,8 +39,5 @@ void add_cache_element_to_rear_sync(cache_queue *queue, cache_element *node);
 cache_element *delete_cache_element_from_head(cache_queue *queue);
 void evict_cache_element_lru(cache_queue *queue);
 cache_element *delete_cache_element(cache_queue *queue, char *id);
-
-int read_cache_element_lru_sync(cache_queue *queue, char *id,
-                             void *content, unsigned int *length);
-int add_data_to_cache_sync(cache_queue *queue, char *id,
-                              void *content, unsigned int length);
+int read_cache_element_sync(cache_queue *queue, char *id, void *content, unsigned int *length);
+int add_data_to_cache_sync(cache_queue *queue, char *id, void *content, unsigned int length);
