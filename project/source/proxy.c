@@ -16,10 +16,7 @@ static const char* proxy_connection_close = "Proxy-Connection: close\r\n";
 static const char* user_agent = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
 
 typedef struct sockaddr_in sockaddr_in;
-typedef struct thread_args {
-  cache_t* cache;
-  fdqueue_t* port_queue;
-} thread_args;
+typedef struct thread_args { cache_t* cache; fdqueue_t* port_queue;} thread_args;
 
 int cache_and_serve(char* buffer, int to_client_fd, int* valid_obj_size, void* cache_content, unsigned int* cache_length, unsigned int length);
 int handle_request(int client_fd, cache_t* cache);
@@ -326,7 +323,7 @@ int request_from_server(
   Rio_readinitb(&rio_client, fd);
   if (Rio_readlineb(&rio_client, buffer, MAXLINE) == -1) {
     // An error occurred.
-    printf("%s\n", buffer);
+    log(buffer);
     return -1;
   } else {
     // Process request.
