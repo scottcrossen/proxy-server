@@ -211,7 +211,7 @@ echo "*** Basic ***"
 tiny_port=$(free_port)
 echo "Starting tiny on ${tiny_port}"
 cd ./tiny
-./tiny ${tiny_port}   &> /dev/null  &
+./tiny ${tiny_port}    &> /dev/null  &
 tiny_pid=$!
 cd ${HOME_DIR}
 

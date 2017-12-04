@@ -10,11 +10,11 @@ SOURCEDIR = source
 RELDIR = rel
 TESTDIR = test
 COMP = gcc
-BINOBJS = ${BINDIR}/proxy.o ${BINDIR}/csapp.o ${BINDIR}/cache.o
+BINOBJS = ${BINDIR}/proxy.o ${BINDIR}/csapp.o ${BINDIR}/cache.o ${BINDIR}/squeue.o ${BINDIR}/logger.o ${BINDIR}/fdqueue.o
 MAIN = ./proxy
 COMPFLAGS = -g -Wall
 LINKFLAGS = -lrt -lpthread
-HANDINDIR = /users/faculty/snell/CS324/handin/Fall2017/ProxyLab1
+HANDINDIR = /users/faculty/snell/CS324/handin/Fall2017/ProxyLab2
 
 # ==== Recipes ====
 

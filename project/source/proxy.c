@@ -1,8 +1,13 @@
+// @Copyright 2017 Scott Leland Crossen
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "csapp.h"
 #include "cache.h"
+#include "logger.h"
+#include "fdqueue.h"
+#include <time.h>
 
 static const char* client_bad_request = "HTTP/1.1 400 Bad Request\r\nServer: Apache\r\nContent-Length: 140\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n<html><head></head><body><p>Bad Request</p></body></html>";
 static const char* connection_close = "Connection: close\r\n";
@@ -11,24 +16,27 @@ static const char* proxy_connection_close = "Proxy-Connection: close\r\n";
 static const char* user_agent = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
 
 typedef struct sockaddr_in sockaddr_in;
-typedef struct thread_args { cache_root* cache; int connfd; } thread_args;
+typedef struct thread_args {
+  cache_t* cache;
+  fdqueue_t* port_queue;
+} thread_args;
 
 int cache_and_serve(char* buffer, int to_client_fd, int* valid_obj_size, void* cache_content, unsigned int* cache_length, unsigned int length);
-int process_non_get_request(char* buffer, rio_t rio_client, char* host_port, int* to_server_fd);
+int handle_request(int client_fd, cache_t* cache);
 int parse_request(char* buffer, char* method, char* protocol, char* host_port, char* resource, char* version);
-int process_get_request(cache_root* cache, int fd, char* buffer, char* method, char* resource, rio_t rio_client, char* host_port, int* to_server_fd, char* cache_id, void* cache_content, unsigned int* cache_length);
-int request_from_server(cache_root* cache, int fd, int* to_server_fd, char* cache_id, void* cache_content, unsigned int* cache_length);
-int serve_client_and_cache(cache_root* cache, int to_client_fd, int to_server_fd, char* cache_id, void* cache_content);
+int process_get_request(cache_t* cache, int fd, char* buffer, char* method, char* resource, rio_t rio_client, char* host_port, int* to_server_fd, char* cache_id, void* cache_content, unsigned int* cache_length);
+int process_non_get_request(char* buffer, rio_t rio_client, char* host_port, int* to_server_fd);
+int request_from_server(cache_t* cache, int fd, int* to_server_fd, char* cache_id, void* cache_content, unsigned int* cache_length);
+int serve_client_and_cache(cache_t* cache, int to_client_fd, int to_server_fd, char* cache_id, void* cache_content);
 int serve_client_from_cache(int to_client_fd, void* cache_content, unsigned int cache_length);
 int serve_client(int to_client_fd, int to_server_fd);
 void close_connection(int* to_client_fd, int* to_server_fd);
 void parse_host(char* host_port, char* remote_host, char* remote_port);
-void* handle_request_routine(void* arg);
 void* watch_port_queue_routine(void* arg);
-void* logger_routine(void* arg);
 
 #define READ_FROM_CACHE 1
 #define NON_GET_METHOD 2
+#define NUM_THREADS 5
 
 int main(int argc, char* argv []) {
   // Initialize server. This is mostly taken directly from tiny server
@@ -61,11 +69,16 @@ int main(int argc, char* argv []) {
     } else {
       // Port not in use. Attach and listen.
       args.cache = init_cache();
+      init_logger();
+      args.port_queue = init_fdqueue();
+      for (int i = 0; i < NUM_THREADS; i++) {
+        Pthread_create(&tid, NULL, watch_port_queue_routine, &args);
+      }
       while (1) {
+        // Queue all file descriptors to queue.
         clientlen = sizeof(clientaddr);
-        args.connfd = Accept(listenfd, (SA*) &clientaddr, (socklen_t*) &clientlen);
-        // Spawn new thread as appropriate.
-        Pthread_create(&tid, NULL, handle_request_routine, &args);
+        int connfd = Accept(listenfd, (SA*) &clientaddr, (socklen_t*) &clientlen);
+        queue_fd(args.port_queue, connfd);
       }
     }
   }
@@ -73,57 +86,64 @@ int main(int argc, char* argv []) {
 }
 
 void* watch_port_queue_routine(void* vargp) {
-  return NULL;
-}
-void* logger_routine(void* vargp) {
+  thread_args* args = (thread_args*) vargp;
+  int client_fd;
+
+  // Run in deatached mode
+  Pthread_detach(pthread_self());
+  while(1) {
+    // Run until a new file descriptor is available
+    if(dequeue_fd(args->port_queue, &client_fd) != -1) {
+      handle_request(client_fd, args->cache);
+    }
+  }
+  Pthread_exit(NULL);
   return NULL;
 }
 
-void* handle_request_routine(void* vargp) {
+int handle_request(int client_fd, cache_t* cache) {
   // Main thread routine when a new connection is encountered.
-  thread_args* args = (thread_args*) vargp;
-  int client_fd = (args->connfd);
-  cache_root* cache = (args->cache);
   char cache_content[MAX_OBJECT_SIZE];
   char cache_id[MAXLINE];
   int ret_val = 0;
   int server_fd = -1;
   unsigned int cache_length;
 
-  // Run thread in detached method.
-  Pthread_detach(pthread_self());
-
-  // request the correct content from the server.
+  // Request the correct content from the server.
   if ((ret_val = request_from_server(cache, client_fd, &server_fd, cache_id, cache_content, &cache_length)) == -1) {
     // Fetch failed
     close_connection(&client_fd, &server_fd);
-    Pthread_exit(NULL);
+    log("Error: Server request failed.");
+    return -1;
   } else if (ret_val == READ_FROM_CACHE) {
     // Content is cached.
     if (serve_client_from_cache(client_fd, cache_content, cache_length) == -1) {
       close_connection(&client_fd, &server_fd);
-      Pthread_exit(NULL);
+      log("Error: Reading from cache failed.");
+      return -1;
     }
   } else if (ret_val == NON_GET_METHOD) {
     // Only get methods supported.
     if (serve_client(client_fd, server_fd) == -1) {
       close_connection(&client_fd, &server_fd);
-      Pthread_exit(NULL);
+      log("Error: Only get messages supported.");
+      return -1;
     }
   } else {
     // Correct branch taken. Cache output when available.
     if (serve_client_and_cache(cache, client_fd, server_fd, cache_id, cache_content) == -1) {
       close_connection(&client_fd, &server_fd);
-      Pthread_exit(NULL);
+      log("Error: Failed to serve client.");
+      return -1;
     }
   }
   // Success!
   close_connection(&client_fd, &server_fd);
-  return NULL;
+  return 0;
 }
 
 int process_get_request(
-  cache_root* cache,
+  cache_t* cache,
   int fd,
   char* buffer,
   char* method,
@@ -287,7 +307,7 @@ int process_non_get_request(
 }
 
 int request_from_server(
-  cache_root* cache,
+  cache_t* cache,
   int fd,
   int* to_server_fd,
   char* cache_id,
@@ -434,7 +454,7 @@ int cache_and_serve(
 }
 
 int serve_client_and_cache(
-  cache_root* cache,
+  cache_t* cache,
   int to_client_fd,
   int to_server_fd,
   char* cache_id,

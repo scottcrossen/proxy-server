@@ -1,61 +1,75 @@
 #include "cache.h"
 
-cache_object* delete_cache_object_from_head(cache_root* queue);
-cache_object* delete_cache_object(cache_root* queue, char* id);
-cache_object* init_cache_object(char* id, int length);
-cache_object* search_for_cache_object(cache_root* queue, char* id);
-void add_cache_object_to_rear_sync(cache_root* queue, cache_object* node);
-void add_cache_object_to_rear(cache_root* queue, cache_object* node);
-void destory_cache_object(cache_object* element);
-void evict_lru_cache_object(cache_root* queue);
+cache_object_t* delete_cache_object_from_head(cache_t* cache);
+cache_object_t* delete_cache_object(cache_t* cache, char* object_id);
+cache_object_t* init_cache_object(char* object_id, int length);
+cache_object_t* search_for_cache_object(cache_t* cache, char* object_id);
+void add_cache_object_to_tail_sync(cache_t* cache, cache_object_t* node);
+void add_cache_object_to_tail(cache_t* cache, cache_object_t* node);
+void destory_cache_object(cache_object_t* object);
+void evict_cache_object(cache_t* cache);
+void send_object_to_tail(cache_t* cache, char* object_id);
 
-cache_root* init_cache() {
-  cache_root* queue = (cache_root*) malloc(sizeof(cache_root));
+void wait_read(cache_t* cache) { P(&(cache->read)); }
+void wait_write(cache_t* cache) { P(&(cache->write)); }
+void signal_read(cache_t* cache) { V(&(cache->read)); }
+void signal_write(cache_t* cache) { V(&(cache->write)); }
 
-  queue->head = NULL;
-  queue->rear = NULL;
-  queue->remaining_length = MAX_CACHE_SIZE;
-  Sem_init(&queue->read, 0, 1);
-  Sem_init(&queue->write, 0, 1);
-  queue->read_count = 0;
-  return queue;
+cache_t* init_cache() {
+  cache_t* cache = (cache_t*) malloc(sizeof(cache_t));
+  // Initiate cache.
+  cache->head = NULL;
+  cache->tail = NULL;
+  cache->remaining_length = MAX_CACHE_SIZE;
+  // Initiate synchonization primitives.
+  Sem_init(&cache->read, 0, 1);
+  Sem_init(&cache->write, 0, 1);
+  cache->read_count = 0;
+  return cache;
 }
 
 int read_data_from_cache(
-  cache_root* queue,
-  char* id,
+  cache_t* cache,
+  char* object_id,
   void* data,
   unsigned int* length
 ) {
-  if (queue != NULL) {
-    P(&(queue->read));
-    queue->read_count++;
-    if (queue->read_count == 1) {
-      P(&(queue->write));
+  // Only allow access if cache has been initialized.
+  if (cache != NULL) {
+    // Lock synchonization primitives
+    wait_read(cache);
+    (cache->read_count)++;
+    if (cache->read_count == 1) {
+      wait_write(cache);
     }
-    V(&(queue->read));
-    cache_object* node = search_for_cache_object(queue, id);
+    signal_read(cache);
+    // Read object from cache
+    cache_object_t* node = search_for_cache_object(cache, object_id);
+    // Process result
     if (node == NULL) {
-      P(&(queue->read));
-      queue->read_count--;
-      if (queue->read_count == 0) {
-        V(&(queue->write));
+      // Not found, finish locks and send error
+      wait_read(cache);
+      (cache->read_count)--;
+      if (cache->read_count == 0) {
+        signal_write(cache);
       }
-      V(&(queue->read));
+      signal_read(cache);
+      // Send error
       return -1;
     } else {
+      // Object found, copy to output.
       *length = node->length;
-      memcpy(data, node->data,* length);
-      P(&(queue->read));
-      queue->read_count--;
-      if (queue->read_count == 0) {
-        V(&(queue->write));
+      memcpy(data, node->data, *length);
+      // Release locks
+      wait_read(cache);
+      (cache->read_count)--;
+      if (cache->read_count == 0) {
+        signal_write(cache);
       }
-      V(&(queue->read));
-      P(&(queue->write));
-      node = delete_cache_object(queue, id);
-      add_cache_object_to_rear(queue, node);
-      V(&(queue->write));
+      signal_read(cache);
+      // Send object to tail.
+      send_object_to_tail(cache, object_id);
+      // Return success
       return 0;
     }
   } else {
@@ -64,156 +78,188 @@ int read_data_from_cache(
 }
 
 int add_data_to_cache(
-  cache_root* queue,
-  char* id,
+  cache_t* cache,
+  char* object_id,
   void* data,
   unsigned int length
 ) {
-  if (queue != NULL) {
-    cache_object* node = init_cache_object(id, length);
-    if (node != NULL) {
-      memcpy(node->data, data, length);
-      node->length = length;
-      add_cache_object_to_rear_sync(queue, node);
-      return 0;
-    } else {
-      return -1;
-    }
+  // Only allow execution on non-empty cache.
+  if (cache != NULL) {
+    // Initialize new object
+    cache_object_t* node = init_cache_object(object_id, length);
+    // Copy over data
+    memcpy(node->data, data, length);
+    node->length = length;
+    // Add object to tail
+    add_cache_object_to_tail_sync(cache, node);
+    return 0;
   } else {
     return -1;
   }
 }
 
-cache_object* init_cache_object(
-  char* id,
+void send_object_to_tail(
+  cache_t* cache,
+  char* object_id
+) {
+  // Put object to end of cache. "Hot"
+  wait_write(cache);
+  add_cache_object_to_tail(cache, delete_cache_object(cache, object_id));
+  signal_write(cache);
+}
+
+cache_object_t* init_cache_object(
+  char* object_id,
   int length
 ) {
-  cache_object* node = (cache_object*) malloc(sizeof(cache_object));
+  // Initialize new cache object from malloc
+  cache_object_t* node = (cache_object_t*) malloc(sizeof(cache_object_t));
+  node->id = (char*) Malloc(sizeof(char) * (strlen(object_id) + 1));
+  // Copy over data and return
+  strcpy(node->id, object_id);
+  node->length = 0;
+  node->data = Malloc(length);
+  node->next = NULL;
+  // Return initialized node
+  return node;
+}
 
-  if (node != NULL) {
-    node->id = (char*) Malloc(sizeof(char)*  (strlen(id) + 1));
-    if (node->id != NULL) {
-      strcpy(node->id, id);
-      node->length = 0;
-      node->data = Malloc(length);
-      if (node->data != NULL) {
-        node->next = NULL;
-        return node;
-      } else {
-        return NULL;
+cache_object_t* search_for_cache_object(
+  cache_t* cache,
+  char* object_id
+) {
+  if (cache != NULL) {
+    // start search at head and cycle through until tail
+    cache_object_t* current_node = cache->head;
+    while (current_node != NULL) {
+      if (strcmp(current_node->id, object_id) == 0) {
+        // Correct node found
+        return current_node;
       }
+      // Go to next node
+      current_node = current_node->next;
+    }
+    return NULL;
+  } else {
+    return NULL;
+  }
+}
+
+void add_cache_object_to_tail(
+  cache_t* cache,
+  cache_object_t* node
+) {
+  // Only perform execution on initialized cache
+  if (cache != NULL) {
+    if (cache->head == NULL) {
+      // Cache is empty
+      cache->head = node;
+      cache->tail = node;
+      cache->remaining_length -= (node->length);
     } else {
+      // Cache is not empty
+      cache->tail->next = node;
+      cache->tail = node;
+      cache->remaining_length -= (node->length);
+    }
+  }
+}
+
+void add_cache_object_to_tail_sync(
+  cache_t* cache,
+  cache_object_t* object
+) {
+  // Only perform execution on initialized cache
+  if (cache != NULL) {
+    // Obtain locks
+    wait_write(cache);
+    while (cache->remaining_length < object->length) {
+      // Clear out as much data as we need
+      evict_cache_object(cache);
+    }
+    // Add object to cache
+    add_cache_object_to_tail(cache, object);
+    // Release locks
+    signal_write(cache);
+  }
+}
+
+cache_object_t* delete_cache_object_from_head(cache_t* cache) {
+  // Only perform execution on initialized cache
+  if (cache != NULL) {
+    // Get the node to delete
+    cache_object_t* current_node = cache->head;
+    if (current_node != NULL) {
+      // Detach from linked list and adjust head
+      cache->head = current_node->next;
+      cache->remaining_length += (current_node->length);
+      if (current_node == cache->tail) {
+        // Fix empty base case
+        cache->tail = NULL;
+      }
+      return current_node;
+    } else {
+      // Cache is empty
       return NULL;
     }
   } else {
+    // Cache not initialized
     return NULL;
   }
 }
 
-cache_object* search_for_cache_object(
-  cache_root* list,
-  char* id
-) {
-  if (list != NULL) {
-    cache_object* cur_node = list->head;
-    while (cur_node != NULL) {
-      if (strcmp(cur_node->id, id) == 0) {
-        return cur_node;
-      }
-      cur_node = cur_node->next;
-    }
-    return NULL;
-  } else {
-    return NULL;
-  }
-}
-
-void add_cache_object_to_rear(
-  cache_root* list,
-  cache_object* node
-) {
-  if (list != NULL) {
-    if (list->head == NULL) {
-      list->head = list->rear = node;
-      list->remaining_length -= node->length;
-    } else {
-      list->rear->next = node;
-      list->rear = node;
-      list->remaining_length -= node->length;
-    }
-  }
-}
-
-void add_cache_object_to_rear_sync(
-  cache_root* queue,
-  cache_object* element
-) {
-  if (queue != NULL) {
-    P(&(queue->write));
-    while (queue->remaining_length < element->length) {
-      evict_lru_cache_object(queue);
-    }
-    add_cache_object_to_rear(queue, element);
-    V(&(queue->write));
-  }
-}
-
-cache_object* delete_cache_object_from_head(cache_root* queue) {
-  if (queue != NULL) {
-    cache_object* cur_node = queue->head;
-    if (cur_node != NULL) {
-      queue->head = cur_node->next;
-      queue->remaining_length += cur_node->length;
-      if (cur_node == queue->rear) {
-        queue->rear = NULL;
-      }
-      return cur_node;
-    } else {
-      return NULL;
-    }
-  } else {
-    return NULL;
-  }
-}
-
-void evict_lru_cache_object(cache_root* queue) {
-  if (queue != NULL) {
-    cache_object* node = delete_cache_object_from_head(queue);
-    Free(node->id);
+void evict_cache_object(cache_t* cache) {
+  // Only perform execution on initialized cache
+  if (cache != NULL) {
+    // Manage queue pointers and get node
+    cache_object_t* node = delete_cache_object_from_head(cache);
+    // Free data.
     Free(node->data);
+    Free(node->id);
     Free(node);
   }
 }
 
-cache_object* delete_cache_object(
-  cache_root* queue,
-  char* id
+cache_object_t* delete_cache_object(
+  cache_t* cache,
+  char* object_id
 ) {
-  if (queue != NULL) {
-    cache_object* prev_node = NULL;
-    cache_object* cur_node = queue->head;
-
-    while (cur_node != NULL) {
-      if (strcmp(cur_node->id, id) == 0) {
-        if (queue->head == cur_node) {
-          queue->head = cur_node->next;
+  // Only perform execution on initialized cache
+  if (cache != NULL) {
+    // Cycle through cache and find correct object_id.
+    cache_object_t* current_node = cache->head;
+    // Keep track of previous node to fix pointers when found
+    cache_object_t* previous_node = NULL;
+    // Cycle through cache
+    while (current_node != NULL) {
+      // Test object object_id
+      if (strcmp(current_node->id, object_id) == 0) {
+        // Correct pointers in structure, take care of edge cases
+        if (cache->head == current_node) {
+          cache->head = (current_node->next);
         }
-        if (queue->rear == cur_node) {
-          queue->rear = prev_node;
+        if (cache->tail == current_node) {
+          cache->tail = previous_node;
         }
-        if (prev_node != NULL) {
-          prev_node->next = cur_node->next;
+        // Use that previous_node we saved
+        if (previous_node != NULL) {
+          previous_node->next = (current_node->next);
         }
-        cur_node->next = NULL;
-        queue->remaining_length += cur_node->length;
-        return cur_node;
+        // Don't let caller access our next pointer
+        current_node->next = NULL;
+        // Adjust cache globals
+        cache->remaining_length += (current_node->length);
+        // Return found node
+        return current_node;
       } else {
-        prev_node = cur_node;
-        cur_node = cur_node->next;
+        // Next iteration
+        previous_node = current_node;
+        current_node = current_node->next;
       }
     }
     return NULL;
   } else {
+    // Cache is not initialized
     return NULL;
   }
 }
