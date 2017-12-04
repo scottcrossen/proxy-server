@@ -11,19 +11,21 @@ static const char* proxy_connection_close = "Proxy-Connection: close\r\n";
 static const char* user_agent = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
 
 typedef struct sockaddr_in sockaddr_in;
-typedef struct thread_args { cache_queue* cache; int connfd; } thread_args;
+typedef struct thread_args { cache_root* cache; int connfd; } thread_args;
 
 int cache_and_serve(char* buffer, int to_client_fd, int* valid_obj_size, void* cache_content, unsigned int* cache_length, unsigned int length);
 int process_non_get_request(char* buffer, rio_t rio_client, char* host_port, int* to_server_fd);
 int parse_request(char* buffer, char* method, char* protocol, char* host_port, char* resource, char* version);
-int process_get_request(cache_queue* cache, int fd, char* buffer, char* method, char* resource, rio_t rio_client, char* host_port, int* to_server_fd, char* cache_id, void* cache_content, unsigned int* cache_length);
-int request_from_server(cache_queue* cache, int fd, int* to_server_fd, char* cache_id, void* cache_content, unsigned int* cache_length);
-int serve_client_and_cache(cache_queue* cache, int to_client_fd, int to_server_fd, char* cache_id, void* cache_content);
+int process_get_request(cache_root* cache, int fd, char* buffer, char* method, char* resource, rio_t rio_client, char* host_port, int* to_server_fd, char* cache_id, void* cache_content, unsigned int* cache_length);
+int request_from_server(cache_root* cache, int fd, int* to_server_fd, char* cache_id, void* cache_content, unsigned int* cache_length);
+int serve_client_and_cache(cache_root* cache, int to_client_fd, int to_server_fd, char* cache_id, void* cache_content);
 int serve_client_from_cache(int to_client_fd, void* cache_content, unsigned int cache_length);
 int serve_client(int to_client_fd, int to_server_fd);
 void close_connection(int* to_client_fd, int* to_server_fd);
 void parse_host(char* host_port, char* remote_host, char* remote_port);
-void* thread_routine(void* arg);
+void* handle_request_routine(void* arg);
+void* watch_port_queue_routine(void* arg);
+void* logger_routine(void* arg);
 
 #define READ_FROM_CACHE 1
 #define NON_GET_METHOD 2
@@ -63,18 +65,25 @@ int main(int argc, char* argv []) {
         clientlen = sizeof(clientaddr);
         args.connfd = Accept(listenfd, (SA*) &clientaddr, (socklen_t*) &clientlen);
         // Spawn new thread as appropriate.
-        Pthread_create(&tid, NULL, thread_routine, &args);
+        Pthread_create(&tid, NULL, handle_request_routine, &args);
       }
     }
   }
   return 0;
 }
 
-void* thread_routine(void* vargp) {
+void* watch_port_queue_routine(void* vargp) {
+  return NULL;
+}
+void* logger_routine(void* vargp) {
+  return NULL;
+}
+
+void* handle_request_routine(void* vargp) {
   // Main thread routine when a new connection is encountered.
   thread_args* args = (thread_args*) vargp;
   int client_fd = (args->connfd);
-  cache_queue* cache = (args->cache);
+  cache_root* cache = (args->cache);
   char cache_content[MAX_OBJECT_SIZE];
   char cache_id[MAXLINE];
   int ret_val = 0;
@@ -114,7 +123,7 @@ void* thread_routine(void* vargp) {
 }
 
 int process_get_request(
-  cache_queue* cache,
+  cache_root* cache,
   int fd,
   char* buffer,
   char* method,
@@ -177,7 +186,7 @@ int process_get_request(
     strcat(cache_id, remote_port);
     strcat(cache_id, resource);
     // Access cached element.
-    if (read_cache_element_sync(cache, cache_id, cache_content, cache_length) != -1) {
+    if (read_data_from_cache(cache, cache_id, cache_content, cache_length) != -1) {
       // Cache contains element. Differ.
       return READ_FROM_CACHE;
     } else {
@@ -278,7 +287,7 @@ int process_non_get_request(
 }
 
 int request_from_server(
-  cache_queue* cache,
+  cache_root* cache,
   int fd,
   int* to_server_fd,
   char* cache_id,
@@ -425,7 +434,7 @@ int cache_and_serve(
 }
 
 int serve_client_and_cache(
-  cache_queue* cache,
+  cache_root* cache,
   int to_client_fd,
   int to_server_fd,
   char* cache_id,
@@ -492,7 +501,7 @@ int serve_client_and_cache(
         }
       }
       // Syncronously add data to cache.
-      if (valid_obj_size && (add_data_to_cache_sync(cache, cache_id, cache_content, cache_length) == -1)) {
+      if (valid_obj_size && (add_data_to_cache(cache, cache_id, cache_content, cache_length) == -1)) {
         return -1;
       } else {
         return 0;

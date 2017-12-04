@@ -1,43 +1,28 @@
-/*
-  The following was taken from the author Pooja Mangla.
-  I'm including it temporarily while I create the rest of the project.
-*/
-
-/*
- *
- * cache.h: Header file containing declaration of APIs
- * implementation of cache
- *
- */
-
 #include "csapp.h"
 
+// Defined in class handout
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
 
-typedef struct cache_element {
-    char *id;
-    struct cache_element *next;
-    void *data;
+// An object stored in cache. Private. A pointer is returned to data in methods.
+typedef struct cache_object {
+    char* id;
+    void* data;
+    struct cache_object* next;
     unsigned int length;
-} cache_element;
+} cache_object;
 
-typedef struct cache_queue {
-    cache_element *head;
-    cache_element *rear;
+// The data structure containing the cache for the proxy
+typedef struct cache_root {
+    cache_object* head;
+    cache_object* rear;
+    sem_t read;
+    sem_t write;
     unsigned remaining_length;
-    sem_t r_mutex, w;
-    unsigned int readcnt;
-} cache_queue;
+    unsigned int read_count;
+} cache_root;
 
-cache_queue *init_cache();
-cache_element *init_cache_element(char *id, int length);
-void destory_cache_element(cache_element *element);
-cache_element *search_cache_element(cache_queue *queue, char *id);
-void add_cache_element_to_rear(cache_queue *queue, cache_element *node);
-void add_cache_element_to_rear_sync(cache_queue *queue, cache_element *node);
-cache_element *delete_cache_element_from_head(cache_queue *queue);
-void evict_cache_element_lru(cache_queue *queue);
-cache_element *delete_cache_element(cache_queue *queue, char *id);
-int read_cache_element_sync(cache_queue *queue, char *id, void *content, unsigned int *length);
-int add_data_to_cache_sync(cache_queue *queue, char *id, void *content, unsigned int length);
+// Methods available for modifying the cache
+cache_root* init_cache();
+int add_data_to_cache(cache_root* queue, char* id, void* content, unsigned int length);
+int read_data_from_cache(cache_root* queue, char* id, void* content, unsigned int* length);
