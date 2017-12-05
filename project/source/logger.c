@@ -33,8 +33,16 @@ void* logger_routine(void* vargp) {
       char* message = ((char*) raw_message);
       current_time(time);
       printf("%s\t%s\n", time, message); fflush(stdout);
+      free(message);
     }
   }
   Pthread_exit(NULL);
   return NULL;
+}
+
+void queue_log(char* message) {
+  // Make a new pointer to save the message.
+  char* stored_message = (char*) malloc(sizeof(char) * (strlen(message) + 1));
+  strcpy(stored_message, message);
+  enqueueLinked(log_queue, (void*) stored_message);
 }

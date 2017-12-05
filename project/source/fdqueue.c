@@ -5,14 +5,15 @@
 typedef linked_queue_t fdqueue_t;
 
 void queue_fd(fdqueue_t* fdqueue, int connfd) {
-  enqueueLinked(fdqueue, (void*) &connfd);
+  // Tell the compiler that we're smarter than it.
+  enqueueLinked(fdqueue, (void*) (long) connfd);
 }
 
 int dequeue_fd(fdqueue_t* fdqueue, int* fd) {
   void* raw_fd;
 
   if(dequeueLinked(fdqueue, &raw_fd) != -1) {
-    *fd = *((int*) raw_fd);
+    *fd = (int) (long) raw_fd;
     return 0;
   } else {
     return -1;
