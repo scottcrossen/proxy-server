@@ -7,7 +7,7 @@
 
 #define LOG_MAX_LENGTH 255
 
-#define LOG_QUEUE_INIT_SIZE 16
+#define LOG_QUEUE_INIT_SIZE 15
 
 #define log(message) \
   queue_log(message)
@@ -17,9 +17,15 @@
   snprintf(_logf_temp, LOG_MAX_LENGTH, message "\r\n", ## __VA_ARGS__); \
   log(_logf_temp)
 
-void queue_log(char* message);
+typedef struct log_queue_t {
+  linked_queue_t* queue;
+  // Not sure if the queue wait behavior works so I'll just use a semaphore here
+  sem_t           entries;
+} log_queue_t;
 
-linked_queue_t* log_queue;
+log_queue_t* log_queue;
+
+void queue_log(char* message);
 
 void init_logger();
 

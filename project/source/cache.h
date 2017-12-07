@@ -24,7 +24,9 @@ typedef struct cache_t {
     unsigned int read_count;
 } cache_t;
 
+// The global instance of the cache
+cache_t* cache;
 // Methods available for modifying the cache
-cache_t* init_cache();
-int add_data_to_cache(cache_t* queue, char* id, void* content, unsigned int length);
-int read_data_from_cache(cache_t* queue, char* id, void* content, unsigned int* length);
+void init_cache();
+int add_data_to_cache(char* id, void* content, unsigned int length);
+int read_data_from_cache(char* id, void* content, unsigned int* length);

@@ -1,13 +1,20 @@
 // @Copyright 2017 Scott Leland Crossen
 
 #include "squeue.h"
+#include "csapp.h"
 
-#define REQ_QUEUE_INIT_SIZE 16
+#define REQ_QUEUE_INIT_SIZE 15
 
-typedef linked_queue_t fdqueue_t;
+typedef struct fd_queue_t {
+  linked_queue_t* queue;
+  // Not sure if the queue wait behavior works so I'll just use a semaphore here
+  sem_t           entries;
+} fd_queue_t;
 
-void queue_fd(fdqueue_t* fdqueue, int connfd);
+fd_queue_t* fd_queue;
 
-int dequeue_fd(fdqueue_t* fdqueue, int* fd);
+void queue_fd(int connfd);
 
-fdqueue_t* init_fdqueue();
+int dequeue_fd(int* fd);
+
+void init_fd();

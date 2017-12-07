@@ -18,9 +18,13 @@ linked_queue_t* createLinkedQueue(unsigned int size, full_behavior_t full_behavi
       this->allocated->next = malloc(sizeof(queue_node_t));
       this->allocated = this->allocated->next;
     }
+  } else {
+    this->tail = NULL;
+    this->allocated = NULL;
   }
   this->full_behavior = full_behavior;
   this->empty_behavior = empty_behavior;
+  this->head = NULL;
 
   if(pthread_mutex_init(&this->lock, NULL) != 0){
     fprintf(stderr, "Could not initialize mutex\r\n");

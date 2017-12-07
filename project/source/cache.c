@@ -15,8 +15,8 @@ void wait_write(cache_t* cache) { P(&(cache->write)); }
 void signal_read(cache_t* cache) { V(&(cache->read)); }
 void signal_write(cache_t* cache) { V(&(cache->write)); }
 
-cache_t* init_cache() {
-  cache_t* cache = (cache_t*) malloc(sizeof(cache_t));
+void init_cache() {
+  cache = (cache_t*) malloc(sizeof(cache_t));
   // Initiate cache.
   cache->head = NULL;
   cache->tail = NULL;
@@ -25,11 +25,9 @@ cache_t* init_cache() {
   Sem_init(&cache->read, 0, 1);
   Sem_init(&cache->write, 0, 1);
   cache->read_count = 0;
-  return cache;
 }
 
 int read_data_from_cache(
-  cache_t* cache,
   char* object_id,
   void* data,
   unsigned int* length
@@ -78,7 +76,6 @@ int read_data_from_cache(
 }
 
 int add_data_to_cache(
-  cache_t* cache,
   char* object_id,
   void* data,
   unsigned int length
