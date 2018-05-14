@@ -5,12 +5,12 @@
 
 BYUNETID = slxn42
 VERSION = 1
-BINDIR = bin
+TMPDIR = tmp
 SOURCEDIR = source
 RELDIR = rel
 TESTDIR = test
 COMP = gcc
-BINOBJS = ${BINDIR}/proxy.o ${BINDIR}/csapp.o ${BINDIR}/cache.o ${BINDIR}/squeue.o ${BINDIR}/logger.o ${BINDIR}/fdqueue.o
+BINOBJS = ${TMPDIR}/proxy.o ${TMPDIR}/csapp.o ${TMPDIR}/cache.o ${TMPDIR}/squeue.o ${TMPDIR}/logger.o ${TMPDIR}/fdqueue.o
 MAIN = ./proxy
 COMPFLAGS = -g -Wall
 LINKFLAGS = -lrt -lpthread
@@ -27,7 +27,7 @@ all: $(MAIN)
 
 .PHONY: clean
 clean:
-	rm -rf $(BINDIR) $(RELDIR) $(MAIN)
+	rm -rf $(TMPDIR) $(RELDIR) $(MAIN)
 
 .PHONY: handin
 handin:
@@ -35,13 +35,13 @@ handin:
 
 # ==== Targets ====
 
-.PRECIOUS: ${BINDIR}/proxy.o
-${BINDIR}/proxy.o: ${SOURCEDIR}/proxy.c ${SOURCEDIR}/csapp.h
+.PRECIOUS: ${TMPDIR}/proxy.o
+${TMPDIR}/proxy.o: ${SOURCEDIR}/proxy.c ${SOURCEDIR}/csapp.h
 	mkdir -p $(@D)
 	$(COMP) -c $< -o $@ $(COMPFLAGS)
 
-.PRECIOUS: ${BINDIR}/%.o
-${BINDIR}/%.o: ${SOURCEDIR}/%.c ${SOURCEDIR}/%.h
+.PRECIOUS: ${TMPDIR}/%.o
+${TMPDIR}/%.o: ${SOURCEDIR}/%.c ${SOURCEDIR}/%.h
 	mkdir -p $(@D)
 	$(COMP) -c $< -o $@ $(COMPFLAGS)
 
